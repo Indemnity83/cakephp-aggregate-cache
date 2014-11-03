@@ -40,11 +40,11 @@
  */ 
 class AggregateCacheBehavior extends ModelBehavior { 
 
-    public $foreignTableIDs = []; 
-    public $config = []; 
-    public $functions = ['min', 'max', 'avg', 'sum', 'count']; 
+    public $foreignTableIDs = array(); 
+    public $config = array(); 
+    public $functions = array('min', 'max', 'avg', 'sum', 'count'); 
 
-    public function setup(Model $model, $config = []) { 
+    public function setup(Model $model, $config = array()) { 
         foreach ($config as $k => $aggregate) { 
             if (empty($aggregate['field'])) { 
                 $aggregate['field'] = $k; 
@@ -90,14 +90,24 @@ class AggregateCacheBehavior extends ModelBehavior {
                 }
             } 
             $assocModel->id = $foreignId; 
-            $assocModel->save($newValues, false, array_keys($newValues)); 
+            if ($assocModel->exists()) {
+                $assocModel->save($newValues, false, array_keys($newValues)); 
+            }
         } 
-    } 
+    }
+    
+    public function beforeSave(Model $model, $options = array()) {
+        # Get the current foreignId in case it is different afterSave
+        foreach ($model->belongsTo as $assocKey => $assocData) { 
+            $this->foreignTableIDs[$assocData['className']] = $model->field($assocData['foreignKey']); 
+        }         
+        return true;
+    }    
 
-    public function afterSave(Model $model, $created, $options = []) {
+    public function afterSave(Model $model, $created, $options = array()) {
         # broad check to make sure $model->data has all the fields
         # aggregation doesn't work if the foreignKey isn't in $model->data
-        if(array_diff_key($model->schema(),$model->data[$model->alias]) !== []):
+        if(array_diff_key($model->schema(),$model->data[$model->alias]) !== array()):
             $model->read();
         endif;
         foreach ($this->config[$model->alias] as $aggregate) { 
@@ -107,6 +117,10 @@ class AggregateCacheBehavior extends ModelBehavior {
             $foreignKey = $model->belongsTo[$aggregate['model']]['foreignKey'];
             $foreignId = $model->data[$model->alias][$foreignKey]; 
             $this->__updateCache($model, $aggregate, $foreignKey, $foreignId); 
+            $oldForeignId = $this->foreignTableIDs[$aggregate['model']];
+            if( !$created && $foreignId != $oldForeignId ) {
+                $this->__updateCache($model, $aggregate, $foreignKey, $oldForeignId);
+            }            
         } 
     } 
 
